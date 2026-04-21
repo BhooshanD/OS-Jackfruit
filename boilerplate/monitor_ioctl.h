@@ -10,6 +10,7 @@
 #endif
 
 #define MONITOR_NAME_LEN 32
+#define MONITOR_DEV_NAME "container_monitor"   /* <-- this line is likely missing */
 
 struct monitor_request {
     pid_t pid;
