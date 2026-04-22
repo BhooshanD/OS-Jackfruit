@@ -257,23 +257,25 @@ hardtest   <pid>   killed   10   20   137
 ### Experiment A: CPU-bound workloads at different nice values
 
 ```bash
-# Terminal B: start two CPU hogs simultaneously
-# One at normal priority (nice=0) and one at lower priority (nice=10)
-
 # Prepare two rootfs copies
 cp -a rootfs-base rootfs-sched1
 cp -a rootfs-base rootfs-sched2
 cp cpu_hog rootfs-sched1/
 cp cpu_hog rootfs-sched2/
 
-# Start simultaneously
-time sudo ./engine run sched1 ./rootfs-sched1 "/cpu_hog 15" &
-time sudo ./engine run sched2 ./rootfs-sched2 "/cpu_hog 15" \
-    --nice 10 &
+# Start BOTH containers in the background first so they compete simultaneously
+sudo ./engine start sched1 ./rootfs-sched1 "/cpu_hog 15"
+sudo ./engine start sched2 ./rootfs-sched2 "/cpu_hog 15" --nice 10
+
+# Now time how long each one takes to finish by running a dummy wait
+{ time sudo ./engine run sched1check ./rootfs-sched1 "/cpu_hog 15" ; } 2>&1 | grep real &
+{ time sudo ./engine run sched2check ./rootfs-sched2 "/cpu_hog 15" --nice 10 ; } 2>&1 | grep real &
 wait
 ```
 
-Compare the real-time output. The nice=0 container should finish noticeably faster.
+Expected result: `sched1check` (nice=0) finishes faster than `sched2check` (nice=10) because CFS gives the lower nice value container a larger share of CPU time when both are competing simultaneously.
+
+> **Note:** `real` time is wall clock seconds. `user` and `sys` are near zero because the engine client itself does almost no work — the actual CPU work happens inside the container.
 
 ### Experiment B: CPU-bound vs I/O-bound
 
@@ -283,19 +285,15 @@ cp -a rootfs-base rootfs-io
 cp cpu_hog rootfs-cpu/
 cp io_pulse rootfs-io/
 
-time sudo ./engine run cpuwork ./rootfs-cpu "/cpu_hog 10" &
-time sudo ./engine run iowork  ./rootfs-io  "/io_pulse 10" &
+# Run both simultaneously and time them
+{ time sudo ./engine run cpuwork ./rootfs-cpu "/cpu_hog 10" ; } 2>&1 | grep real &
+{ time sudo ./engine run iowork  ./rootfs-io  "/io_pulse 10" ; } 2>&1 | grep real &
 wait
 ```
 
-The I/O-bound task voluntarily blocks on disk/sleep — the CPU-bound task gets more CPU slices but completes in similar wall-clock time to the I/O task.
+The I/O-bound container voluntarily sleeps most of the time, so CFS gives it high responsiveness whenever it wakes up. The CPU-bound container gets more total CPU time but both finish in similar wall-clock time because the I/O container is mostly waiting on sleep/disk, not competing for CPU.
 
-```bash
-# Show running both at the same time with ps
-sudo ./engine ps
-```
-
-**Take Screenshot 7 here** — show `ps` with both scheduling containers running, and the terminal output with timing results.
+**Take Screenshot 7 here** — show the terminal output with both `real` times side by side for each experiment.
 
 ---
 
@@ -389,8 +387,10 @@ sudo ./engine ps
 # === Scheduler experiments ===
 cp -a rootfs-base rootfs-sched1 && cp -a rootfs-base rootfs-sched2
 cp cpu_hog rootfs-sched1/ && cp cpu_hog rootfs-sched2/
-time sudo ./engine run sched1 ./rootfs-sched1 "/cpu_hog 15" &
-time sudo ./engine run sched2 ./rootfs-sched2 "/cpu_hog 15" --nice 10 &
+sudo ./engine start sched1 ./rootfs-sched1 "/cpu_hog 15"
+sudo ./engine start sched2 ./rootfs-sched2 "/cpu_hog 15" --nice 10
+{ time sudo ./engine run sched1check ./rootfs-sched1 "/cpu_hog 15" ; } 2>&1 | grep real &
+{ time sudo ./engine run sched2check ./rootfs-sched2 "/cpu_hog 15" --nice 10 ; } 2>&1 | grep real &
 wait
 
 # === Teardown ===
